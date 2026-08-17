@@ -1,122 +1,143 @@
-"# PQC" 
+好，我把這一段更新成比較 **ASIC-oriented** 的版本，CPU 只當 SLotH 的實作背景，不把重點放在 firmware。
 
-好，這一段我會讓它完全圍繞 **SLotH 的核心觀念**：
-**瓶頸不只在 hash core，而在每次 hash 之間的資料準備與控制 overhead。**
-
-我建議這個 section 做 **5 頁**。
+## Section: Hash Processing and Overhead Optimization
 
 ### Slide 1 — Why Faster Hash Is Not Enough
 
-先把問題講清楚。
+**Goal:** 先定義真正的問題。
 
-文字可以放：
+投影片文字可以放：
 
-* SLH-DSA requires a huge number of short, repetitive hash operations
-* After the hash core is accelerated, **data preparation and control overhead become significant**
-* Major overhead sources:
+**SLH-DSA executes a huge number of short and repetitive hash operations**
 
-  * Padding / input formatting
+* Hash-core latency is only part of the total cost
+* Consecutive hashes also require:
+
+  * Input formatting
+  * Padding
   * ADRS update
-  * Memory movement
-  * CPU–accelerator communication
-  * Starting and waiting for each hash operation
+  * Intermediate-data movement
+  * Control and synchronization
 
 最下面一句：
 
-> **The goal is not only to make each hash faster, but to reduce the gap between consecutive hashes.**
+> **The optimization target is not only hash latency, but also the overhead between consecutive hashes.**
 
-這頁就是這個 section 的 motivation。
+你口頭可以補一句：
 
----
-
-### Slide 2 — Evidence: Hash Core Utilization Matters
-
-這頁放 SLotH 論文那個很漂亮的例子。
-
-標題也可以叫：
-
-**A Faster Core Does Not Guarantee Faster SLH-DSA**
-
-內容：
-
-* Previous design reduced Keccak from **24 rounds to 12 rounds**
-* Hash computation was almost 2× faster
-* But overall signing improved by only **~3%**
-* Most cycles were spent in **control logic and HW/SW interface**
-
-
-
-最下面大字：
-
-> **Interface overhead can dominate after hash acceleration.**
-
-我覺得這頁非常重要，因為它不是你自己猜測，而是有直接 benchmark 支撐。
+「即使最後做的是 full-hardware ASIC，這些事情還是要由某個 control logic 完成，所以這不是單純 CPU overhead 的問題。」
 
 ---
 
-### Slide 3 — SLotH Architecture
+### Slide 2 — Evidence: Inter-Hash Overhead Can Dominate
 
-這頁正式介紹 SLotH。
+這頁就用 SLotH Section 5.1 的比較。
 
-放論文 Fig. 5：
+建議自己整理一個很小的 comparison：
 
-**RV32 Core + SHA2-256 + SHA2-512 + Keccak accelerators**
+| Design change      | Hash core             | Overall effect          |
+| ------------------ | --------------------- | ----------------------- |
+| SHAKE → TurboSHAKE | 24 rounds → 12 rounds | Signing only ~3% faster |
 
-然後旁邊只寫：
+下面：
 
-* Generic RISC-V controller executes SLH-DSA algorithm
-* Hash accelerators are memory-mapped
-* SLH-DSA-specific operations are moved into hash hardware
-* No custom RISC-V instruction is required
+> **A 2× faster permutation does not imply a 2× faster SLH-DSA implementation.**
+
+再放一句作者的核心觀察：
+
+> Most cycles were spent in control logic and the hardware–software interface.
 
 
 
-這頁核心不是 RISC-V 本身，而是：
+然後你要立刻把它轉成 ASIC insight：
 
-> **Keep high-level control in software, but move repetitive low-level hash handling into hardware.**
+> **Architectural lesson:** the hash datapath must be supplied with the next operation efficiently.
 
----
-
-### Slide 4 — What Does SLotH Move into Hardware?
-
-這頁是這個 section 的核心。
-
-我會分成兩欄：
-
-**Conventional Hash Accelerator**
-
-* Load message
-* Format input
-* Add padding
-* Update ADRS
-* Start hash
-* Wait
-* Read result
-* Repeat
-
-**SLotH**
-
-* Cached `PK.seed`
-* Cached `SK.seed`
-* Internal ADRS register
-* Automatic message formatting
-* Automatic padding
-* Automatic ADRS update
-* Autonomous Winternitz-chain iteration
-
-SLotH 的 Keccak 與 SHA2-256 control unit 都特別加入這些 SLH-DSA-specific features。
-
-下面一句：
-
-> **Reduce software involvement between consecutive hash operations.**
+這樣觀眾就不會覺得你在介紹 CPU 優化。
 
 ---
 
-### Slide 5 — Autonomous WOTS+ Chain
+### Slide 3 — SLotH as a Case Study
 
-最後用 WOTS 把這件事情講具體。
+標題不要直接叫 Architecture，改成這個比較符合你的主線。
 
-先畫：
+可以放 SLotH Fig. 5，旁邊文字：
+
+**SLotH keeps high-level SLH-DSA control outside the hash core, but moves repetitive hash-specific operations into hardware**
+
+* Dedicated SHA2-256 / SHA2-512 / Keccak accelerators
+* Internal storage for frequently reused values
+* SLH-DSA-specific formatting and chaining support
+* High-level control issues coarse-grained commands
+
+
+
+最下面：
+
+> **The important idea is the boundary between global control and local hash control.**
+
+這一句對你們 ASIC 很重要。
+
+---
+
+### Slide 4 — Move Repetitive Control Close to the Hash Unit
+
+這頁直接把 SLotH 的技巧抽象成 ASIC 可以用的 architecture principle。
+
+左邊可以畫：
+
+**Centralized control**
+
+```text
+Main FSM
+  ↓
+Prepare input
+  ↓
+Hash
+  ↓
+Read result
+  ↓
+Update ADRS
+  ↓
+Prepare next hash
+```
+
+右邊：
+
+**Local hash control**
+
+```text
+Main FSM
+   ↓  high-level command
+Hash Engine
+ ├─ Input formatter
+ ├─ Padding logic
+ ├─ ADRS updater
+ ├─ Chain counter
+ └─ Feedback path
+```
+
+旁邊文字：
+
+* Cache frequently reused inputs such as `PK.seed`
+* Generate hash input format locally
+* Update ADRS locally
+* Feed hash outputs directly into dependent operations
+* Avoid returning to the top-level controller after every hash
+
+最下面一句：
+
+> **Reduce control distance between dependent hash operations.**
+
+這頁其實就是你們未來 ASIC 最值得拿走的東西。
+
+---
+
+### Slide 5 — Autonomous WOTS+ Chaining
+
+最後用最具體的 WOTS 例子收尾。
+
+上面先放：
 
 [
 X_0 = PRF(PK.seed,SK.seed,ADRS)
@@ -126,53 +147,38 @@ X_0 = PRF(PK.seed,SK.seed,ADRS)
 X_j = F(PK.seed,ADRS_j,X_{j-1})
 ]
 
-然後左右比較：
+左邊：
 
-**Without chain support**
+**Without autonomous chaining**
 
-```text
-CPU prepares F
-→ Hash
-→ CPU reads result
-→ Update ADRS
-→ Prepare next F
-→ Hash
-→ ...
-```
+* Prepare every (F) input separately
+* Update ADRS after each iteration
+* Move intermediate result back to controller/memory
+* Restart the hash engine repeatedly
 
-**SLotH**
+右邊：
 
-```text
-CPU sets:
-X0 + ADRS + iteration count
+**With autonomous chaining**
 
-↓
-Hardware automatically executes
-F → F → F → ... → F
-```
+* Configure initial value, ADRS, and iteration count
+* Automatically update ADRS
+* Feed (X_j) directly into the next (F)
+* Return only the final chain result
 
-SLotH 的 Winternitz chaining 在 hardware 中自動更新 ADRS 並反覆執行 F；Keccak 每次 chain iteration 除 permutation 本身外只增加最多約 2 cycles 的控制開銷。
+SLotH 的實作中，Winternitz chain iteration 可以由硬體自動執行，hash iteration 之間只需很少額外控制 cycle。
 
-頁尾：
+最下面大字：
 
-> **SLotH optimizes the transitions between hashes, not just the hash itself.**
-
-這句就是這一節的 takeaway。
+> **Keep intermediate values inside the datapath and keep the hash unit busy.**
 
 ---
 
-所以整段的故事很簡單：
+這五頁的邏輯現在會變成：
 
-**Why faster hash is not enough**
-→ **實驗證明 interface overhead 很重要**
-→ **SLotH 的 architecture**
-→ **它把哪些 overhead 搬進 hardware**
-→ **用 WOTS chain 展示效果**
+**1. 問題：hash 快還不夠**
+→ **2. 證據：core 快 2×，整體只快 3%**
+→ **3. SLotH 展示一種解法**
+→ **4. 抽象成 ASIC 可用的 local-control principle**
+→ **5. 用 WOTS autonomous chaining 給具體例子**
 
-然後下一 section 就可以非常自然地接：
-
-# WOTS+ and Merkle-Tree Parallelization
-
-因為你剛講完「怎麼讓**一個 hash unit**不要閒著」，下一段就開始問：
-
-> **那如果我們放更多 hash units，可以同時做多少事情？**
+我覺得這樣就很適合你們的研究方向，因為 **SLotH 是 evidence，而不是你們要照抄的 CPU architecture**。
