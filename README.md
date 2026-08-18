@@ -1,237 +1,202 @@
-好，這樣交換之後確實更順：**先讓大家知道 SLotH 是誰，再拿它的觀察來講 overhead。**
+好，SCA 這章我建議抓 **5～6 頁**，而且主線不要變成「介紹 masking 技術」，而是回答一個很清楚的問題：
 
-那下一個主題 **WOTS+ and Merkle Tree Parallelization**，我建議做成 **6 頁**，而且主線要很清楚：
+> **在 SLH-DSA 裡，到底哪些 hash operation 真的會洩漏秘密、值得付面積成本去保護？**
 
-> **WOTS+ 的平行化很直觀，但 Merkle tree 的平行化牽涉 dependency、scheduling 和 memory，所以設計空間更大。**
+這樣會跟你前面 ASIC 設計主線一致。
+
+## Slide 1 — What Is Secret in SLH-DSA?
+
+先把 public / secret data 分清楚。
+
+### Public / non-secret
+
+* `PK.seed`
+* `ADRS`
+* message / digest
+* authentication path
+
+### Secret
+
+* `SK.seed`
+* `SK.prf`
+
+然後 highlight：
+
+[
+PRF(PK.seed, SK.seed, ADRS)
+]
+
+文字可以放：
+
+> **PRF directly processes the master secret `SK.seed`.**
+
+> Repeated use of the same secret makes PRF the primary side-channel target.
+
+SLotH 特別指出，`PRF` 因為直接反覆處理 `SK.seed`，是主要需要保護的 primitive。
 
 ---
 
-## Slide 1 — Parallelism in SLH-DSA
+## Slide 2 — Why Repeated PRF Calls Are Dangerous
 
-這頁先把問題拆成 WOTS+ 和 Merkle tree。
+這頁講「為什麼 SLH-DSA 特別容易」。
 
 可以放：
 
-### **WOTS+**
-
-* Each hash chain is sequential
-* Different chains are independent
-* Natural parallelism across multiple chains
-
-### **Merkle Tree**
-
-* Nodes at the same level can be computed in parallel
-* Parent nodes depend on child nodes
-* Parallelism is constrained by tree dependencies and memory availability
-
-最下面一句：
-
-> **WOTS+ parallelism is straightforward; Merkle-tree parallelism requires scheduling.**
-
-這頁就是整個 section 的 thesis。
-
----
-
-## Slide 2 — WOTS+ Parallelization
-
-這頁畫多條 chain 最有效：
-
-```text
-Chain 0: PRF → F → F → ... → F
-Chain 1: PRF → F → F → ... → F
-Chain 2: PRF → F → F → ... → F
-                    ...
-```
-
-旁邊文字可以放：
-
-* Operations within one chain are data-dependent
-* Different WOTS+ chains can be processed independently
-* Multiple hash units can therefore process multiple chains simultaneously
-* Existing designs mainly differ in **how many chains are processed in parallel**
-
-SPHINCSLET 就是用兩個 hash modules 利用 chain-level parallelism；它明確說 WOTS+ public-key generation 採用 chain-parallel approach。
-
-最後一句：
-
-> **More hash units directly translate into more chain-level parallelism — if enough independent chains are available.**
-
----
-
-## Slide 3 — Why Merkle Trees Are Different
-
-這頁畫一棵小樹：
-
-```text
-K0   K1   K2   K3
- \   /     \   /
-  N0        N1
-      \    /
-       Root
-```
-
-然後 highlight dependency：
-
-* (N_0) must wait for (K_0,K_1)
-* (N_1) must wait for (K_2,K_3)
-* Root must wait for both (N_0,N_1)
-
-旁邊列：
-
-**Design questions**
-
-* How many leaves should be generated in parallel?
-* When should parent-node computation start?
-* Should hash units have fixed roles?
-* Which intermediate nodes should be stored?
-* How much memory bandwidth is required?
-* Can every hash unit remain busy?
+* A single signature invokes PRF many times
+* The same `SK.seed` appears repeatedly
+* Only ADRS / index-related inputs change
+* Leakage from repeated occurrences can be combined
 
 最下面：
 
-> **Merkle-tree acceleration is a scheduling and memory problem, not only a hash-throughput problem.**
+> **This enables horizontal side-channel analysis within one or a few traces.**
 
-這句很重要。
+你可以再放一個小示意：
+
+```text
+PRF(SK.seed, ADRS0)
+PRF(SK.seed, ADRS1)
+PRF(SK.seed, ADRS2)
+PRF(SK.seed, ADRS3)
+        ...
+     same secret
+```
+
+這頁是讓聽眾理解：不是因為 PRF 這個函數本身神秘，而是**同一 master secret 被大量重複使用**。
 
 ---
 
-# 接著直接進 1 / 2 / 3-way
+## Slide 3 — Experimental Evidence: TVLA
 
-## Slide 4 — Single-Hash Baseline
+這頁直接放 SLotH 的 leakage figure。
 
-這頁不用綁死某篇 paper，可以把 SLotH 當 representative baseline。
+標題可以：
 
-畫：
-
-```text
-Hash Unit
-
-K0 → K1 → N0 → K2 → K3 → N1 → ... 
-```
-
-當然真實順序不一定長這樣，你只是在表達所有 hash 共用同一 datapath。
+**Unprotected SLH-DSA Leaks Quickly**
 
 文字：
 
-### **Single Hash Unit**
-
-* Minimum hardware cost
-* No scheduling conflict between hash units
-* Simple memory architecture
-* All WOTS+ and tree-node operations are serialized
-
-最下面：
-
-> **High utilization is possible, but no operation-level parallelism is exploited.**
-
-然後口頭說：
-
-「像前面 SLotH 的思路，是先把單一 hash unit 本身盡可能餵滿。」
-
-這樣就把上一 section 接過來。
-
----
-
-## Slide 5 — Two-Way Parallelism: SPHINCSLET
-
-這頁放 SPHINCSLET Fig. 6 或 HASH_TILE + Fig. 6 的簡化圖。
-
-它的 HASH_TILE 有兩個 hash modules：`L_HASH`、`R_HASH`。
-
-Merkle tree 的操作方式很值得講：
-
-* Four child nodes are prepared
-* Two parent nodes are computed in parallel
-* Intermediate nodes are stored in internal BRAM
-* Computation proceeds level by level / partial traversal
-* Only a limited number of nodes need to be retained
-
-SPHINCSLET 明確說它以四個 node 為一個處理單位，兩個 hash module 同時產生 parent nodes，並透過 traversal 限制每層需保存的 intermediate values。
+* Fixed-vs-random TVLA
+* Target: `SK.seed`
+* CPU-based SHAKE-128f implementation
+* Leakage visible after only **1,000 traces**
+* Maximum (|t| \approx 24.5)
+* Common TVLA threshold: (|t| = 4.5)
 
 最下面：
 
-> **Two hash units map naturally to pairs of independent tree-node computations.**
+> **The repeated PRF computation exposes measurable leakage very quickly.**
 
-這頁最好同時講到 **parallelism + memory**，因為這就是它比單純「兩顆 hash」更有意思的地方。
+這是 SLotH Section 6.1 的實驗。
 
 ---
 
-## Slide 6 — Three-Way Parallelism: Trident
+## Slide 4 — Is Protecting PRF Enough?
 
-這頁開始講 Trident。
+這頁開始進更有意思的地方。
 
-我建議直接用它 Fig. 5 的 tree dataflow。
+答案：
 
-可以把核心概念簡化成：
+**Not necessarily.**
 
-```text
-Hash Connector 0 → leaf generation
-Hash Connector 1 → leaf generation
-Hash Connector 2 → parent-node generation
-```
+文字可以放：
 
-然後旁邊寫：
+* `PRF` directly exposes `SK.seed`
+* The output of PRF becomes the beginning of a WOTS+/FORS hash chain
+* Early chain values can still reveal useful secret-dependent information
+* Therefore SLotH also protects selected subsequent `F` operations
 
-* Three concurrent hash operations
-* Two units can generate WOTS+/leaf results
-* The third unit can consume completed child nodes
-* Cache BRAM keeps recently generated intermediate nodes
-* Leaf generation and tree reduction can overlap
+然後分兩個：
 
-Trident 的實際排程就是讓 Connector 0/1 產生 leaf，而 Connector 2 在可用時處理 parent nodes；論文用這個方式試圖重疊兩種工作。
+### WOTS+
+
+Protect:
+
+> `PRF → F → F → ...`
+
+during signing / public-key generation
+
+### FORS
+
+Protect:
+
+> `PRF → F`
+
+for secret-key generation / leaf binding
+
+SLotH 明確說他們 mask 所有 PRF，並保護 WOTS signing / key generation 中後續 chaining，以及 FORS 中 PRF 後的 F。
 
 最下面：
 
-> **The third hash path attempts to overlap leaf production with tree reduction.**
+> **Sensitive intermediate values matter, not only the master key itself.**
 
 ---
 
-但我其實會再加 **第 7 頁**，因為這是你最值得講的東西。
+## Slide 5 — SLotH Protection: Threshold Implementation
 
-## Slide 7 — Does More Parallelism Always Help?
+這頁介紹 solution，但不要陷太深數學。
 
-這頁就是你的 analysis。
+內容：
 
-左邊畫：
+### Three-share Threshold Implementation for Keccak
 
-```text
-1 unit  → easy to utilize
-2 units → natural pair-wise parallelism
-3 units → producer / consumer balance?
-4 units → more area, but enough work?
-```
+* Secret state represented by three Boolean shares
+* PRF computation is masked
+* Sensitive WOTS+/FORS chain operations are also masked
+* Protected Keccak interface remains functionally similar to the normal accelerator
 
-右邊列：
+然後：
 
-### **Potential limitations**
+> **100,000-trace TVLA was used to evaluate the protected implementation.**
 
-* Parent operations must wait for child nodes
-* Leaf generation is much more expensive than one parent hash
-* Hash units may become imbalanced
-* Memory-access order may limit parallelism
-* More units increase area even when idle
 
-然後引用 Trident 自己的 observation：
 
-* Larger (h') → better parallelization
-* Smaller (h') in fast variants → memory access order reduces parallelization efficiency 
+可以在旁邊註明 limitation：
+
+> SCA protection is provided for **Keccak/SHAKE only** in SLotH.
+
+SHA-2 units沒有等價的 protected implementation。
+
+---
+
+## Slide 6 — Security vs. Area Cost
+
+我很建議保留這頁，因為你們是做 ASIC。
+
+直接放 SLotH 的 area numbers 概念比較：
+
+Normal full system：
+**155.35 kGE**
+
+With three-share TI Keccak：
+**285.84 kGE**
+
+也就是保護後整體面積接近翻倍。
+
+所以右邊寫：
+
+### Design implication
+
+* Masking every hash operation is expensive
+* Verification does not require `SK.seed`
+* Different operations have different sensitivity
+* Protection should be applied selectively
 
 最下面大字：
 
-> **The optimal number of hash units depends on utilization, not just theoretical parallelism.**
+> **Protect secret-dependent hash paths, not necessarily the entire hash datapath.**
 
-這句其實就是你們未來設計最重要的 takeaway。
+這句我覺得就是這章最值得留給你們未來 ASIC 設計的 takeaway。
 
 ---
 
-所以這個 section 最後會是：
+所以 SCA 章節的故事會非常完整：
 
-1. **Parallelism in SLH-DSA**
-2. **WOTS+ Parallelization**
-3. **Why Merkle Trees Are Different**
-4. **Single-Hash Baseline**
-5. **Two-Way: SPHINCSLET**
-6. **Three-Way: Trident**
-7. **Does More Parallelism Always Help?**
+**1. 哪些資料是秘密？**
+→ **2. 為什麼 PRF 特別危險？**
+→ **3. 實驗真的測到 leakage**
+→ **4. PRF 後面的 chain 也可能需要保護**
+→ **5. SLotH 用 TI 保護**
+→ **6. 但代價很大，所以應 selective protection**
 
-我覺得這比直接「SLotH / SPHINCSLET / Trident」各講一頁更好，因為你是在用三篇論文回答一個 architectural question。
+這樣會比單純講「SLotH 有做 TI」有研究價值很多。
