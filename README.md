@@ -1,0 +1,1 @@
+T. Huang et al., “An Efficient and Reconfigurable Post-Quantum Crypto-Processor for SPHINCS+,” IEEE TCAS-I, vol. 72, no. 5, pp. 2252–2262, May 2025.
