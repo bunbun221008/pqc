@@ -15,3 +15,6 @@ Each SRAM contains **1,280 × 96-bit words**. Signature storage uses all 96 bits
 * **Remaining workspace:** 416 words, providing **3,328 B** of usable storage at 64 bits per word.
 * **Tree allocation:** Two nodes per level, plus two additional node slots in each of SRAM2 and SRAM3.
 * **Registers:** PK.seed, SK.seed, ADRS, and hash buffers are stored separately and excluded from this table.
+
+
+Use separate 384-bit input and output buffers to access all four SRAM banks simultaneously. Batch signature transfers into 48-byte blocks to reduce access overhead.
