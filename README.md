@@ -134,3 +134,6 @@
 其中第二點報告時要說明**比較對象是 SPHINCSLET**，並依你比較的操作區分 sign／verify。這樣不會讓聽眾誤以為「三平行本身沒有加速效果」。
 
 你的結論可以口頭說：**我們目前沒有為了提高頻率而改成 Trident pipeline 的需求，因此優先保留現有 Keccak，採用兩個獨立單元。**
+
+
+Trident’s gains mainly stem from pipelining and reduced memory usage, with no clear evidence that three-way parallelism itself is better suited to our architecture.
